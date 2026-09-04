@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Nogi Relay</string>
+    <string name="channel_calls">成员来电</string>
+    <string name="channel_messages">新消息</string>
+</resources>

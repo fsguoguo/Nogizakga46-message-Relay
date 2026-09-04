@@ -1,0 +1,113 @@
+# fly.toml app configuration file generated for nogi-relay on 2026-09-03T10:00:00+08:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+
+app = "nogi-relay"
+primary_region = "nrt"  # Tokyo, Japan (closest to China)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  app = "npm start"
+  monitor = "npm run monitor"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  NOGI_WEB_URL = "https://message.nogizaka46.com"
+  NOGI_API_URL = "https://api.message.nogizaka46.com"
+  NOGI_APP_ID = "jp.co.sonymusic.communication.nogizaka 2.5"
+  NOGI_APP_PLATFORM = "web"
+  NOGI_ORGANIZATION_ID = "1"
+  NOGI_POLL_INTERVAL_SECONDS = "60"
+  NOGI_MESSAGE_COUNT = "200"
+  NOGI_BACKFILL_ON_START = "true"
+  NOGI_MONITOR_MODE = "browser"
+  NOGI_BROWSER_STATE_FILE = "/data/nogi-browser-state.json"
+  NOGI_BROWSER_HEADLESS = "true"
+  NOGI_BROWSER_AUTH_WAIT_SECONDS = "30"
+  NOGI_BROWSER_SETTLE_SECONDS = "8"
+  NOGI_BROWSER_BLOCK_MEDIA = "true"
+  NOGI_BROWSER_SESSION_REFRESH_INTERVAL_MINUTES = "30"
+  NOGI_BROWSER_RESTART_INTERVAL_SECONDS = "1800"
+  NOGI_MEDIA_PORT = "8081"
+  MEDIA_STORAGE_DIR = "/data/nogi-media"
+  MEDIA_MAX_BYTES = "104857600"
+  PUBLIC_BASE_URL = "https://nogi-relay.fly.dev"
+  PUBLIC_MEDIA_BASE_URL = "https://nogi-relay.fly.dev:8081"
+
+[http_service]
+  internal_port = 8080
+  processes = ["app"]
+  force_https = true
+  auto_stop_machines = false  # 不自动停止，保持运行
+  auto_start_machines = true
+  min_machines_running = 1    # 至少保持 1 台机器运行
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[[mounts]]
+  source = "nogi_media"
+  destination = "/data"
+  processes = ["monitor"]
+
+# 主 API 服务
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5s"
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "get"
+    path = "/health"
+    protocol = "http"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8081
+  processes = ["monitor"]
+
+  [[services.ports]]
+    port = 8081
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.tcp_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"

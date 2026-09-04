@@ -1,0 +1,38 @@
+{
+  "name": "nogi-relay-server",
+  "version": "1.0.0",
+  "description": "Nogizaka46 Message Relay Server - Push notifications to Android app",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "monitor": "node src/monitor/index.js",
+    "monitor:direct": "node src/monitor/nogi-web.js",
+    "monitor:browser": "node src/monitor/nogi-browser.js",
+    "bootstrap:browser": "node src/monitor/bootstrap-browser.js",
+    "db:setup": "psql -U postgres -d nogi_relay -f database/schema.sql",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "nogizaka46",
+    "fcm",
+    "push-notification",
+    "relay-server"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3",
+    "firebase-admin": "^12.0.0",
+    "playwright": "^1.40.1",
+    "express-rate-limit": "^7.1.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

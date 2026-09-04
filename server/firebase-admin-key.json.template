@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "nogizaka46-relay",
+  "private_key_id": "请从 Firebase Console 获取",
+  "private_key": "请从 Firebase Console 获取 - 格式: -----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n",
+  "client_email": "firebase-adminsdk-xxxxx@nogizaka46-relay.iam.gserviceaccount.com",
+  "client_id": "请从 Firebase Console 获取",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "请从 Firebase Console 获取",
+  "universe_domain": "googleapis.com"
+}
