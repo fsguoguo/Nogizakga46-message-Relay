@@ -5,6 +5,39 @@ import messageService from '../services/message.js';
 
 const router = express.Router();
 
+const TEST_CALL_AUDIO = createTestCallAudio();
+
+function createTestCallAudio() {
+  const sampleRate = 8_000;
+  const seconds = 0.75;
+  const sampleCount = Math.floor(sampleRate * seconds);
+  const dataSize = sampleCount * 2;
+  const buffer = Buffer.alloc(44 + dataSize);
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+  for (let index = 0; index < sampleCount; index++) {
+    const envelope = Math.min(1, index / 160, (sampleCount - index) / 160);
+    const value = Math.round(Math.sin((2 * Math.PI * 440 * index) / sampleRate) * 0.22 * envelope * 32_767);
+    buffer.writeInt16LE(value, 44 + index * 2);
+  }
+  return buffer;
+}
+
+function publicBaseUrl() {
+  return (process.env.PUBLIC_BASE_URL || 'https://nogi-relay.fly.dev').replace(/\/$/, '');
+}
+
 /**
  * POST /v1/push/send
  * 手动发送推送（测试用）
@@ -101,6 +134,17 @@ router.post('/test-message', async (req, res) => {
 });
 
 /**
+ * GET /v1/push/test-call-audio.wav
+ * Authenticated short audio used by test-call so the client can verify
+ * download-before-full-screen behavior without relying on a third-party URL.
+ */
+router.get('/test-call-audio.wav', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'audio/wav');
+  res.send(TEST_CALL_AUDIO);
+});
+
+/**
  * POST /v1/push/test-call
  * 测试全屏来电推送
  */
@@ -117,7 +161,7 @@ router.post('/test-call', async (req, res) => {
       phone_image_url: null,
       type: 'audio',
       text: null,
-      media_url: 'https://example.com/test-audio.mp3',
+      media_url: `${publicBaseUrl()}/v1/push/test-call-audio.wav`,
       thumbnail_url: null,
       duration_seconds: 30,
       sent_at: new Date().toISOString(),

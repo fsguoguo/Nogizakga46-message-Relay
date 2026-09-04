@@ -398,7 +398,7 @@ $token = Read-Host 'ACCESS_TOKEN'; Invoke-RestMethod -Method Post -Uri 'https://
 $token = Read-Host 'ACCESS_TOKEN'; Invoke-RestMethod -Method Post -Uri 'https://nogi-relay.fly.dev/v1/push/test-call' -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json; charset=utf-8' -Body (@{ member_name='来电测试' } | ConvertTo-Json)
 ```
 
-`test-call` 不写入服务器的 `messages` 或 `push_logs` 表，推送是否成功以接口响应中的 `successCount` 和 `failureCount` 为准。其媒体 URL 是示例地址，适合测试来电通知界面，不保证能够播放真实语音。
+`test-call` 不写入服务器的 `messages` 或 `push_logs` 表，推送是否成功以接口响应中的 `successCount` 和 `failureCount` 为准。服务端会从 `/v1/push/test-call-audio.wav` 提供一段内置短 WAV，客户端必须下载完成后才显示来电页面。
 
 服务端启动时会清理旧版本遗留的 `test-...` 和 `test_...` 消息，历史消息接口也不会返回测试 ID。客户端数据库升级到 v3 时会清理本地旧测试记录；客户端启动和测试来电结束时还会撤销对应的临时来电通知。
 
@@ -495,8 +495,9 @@ schema 包含成员基础信息表，但监控实际以官网 `/v2/groups` 返�
 3. `NogiFirebaseMessagingService` 收到 data message。
 4. 客户端优先解析完整 payload，否则请求 `/v1/messages/:id`。
 5. 消息写入 SQLite。
-6. 非文字媒体在后台预下载到应用私有缓存。
-7. 新消息才显示通知，重复消息不重复提醒。
+6. 语音来电先由 `IncomingCallPreparationService` 下载到应用私有缓存。
+7. 音频下载成功后才发布来电通知并启动全屏来电页；下载失败只保留可重试通知。
+8. 其他非文字媒体在后台预下载，新消息才显示通知，重复消息不重复提醒。
 
 ### 全屏来电条件
 
@@ -509,7 +510,7 @@ type == audio
 
 Android 14 还需要用户允许应用使用全屏通知。概览页面会显示通知权限和全屏通知权限状态，并提供设置入口。
 
-收到高优先级 FCM 后，客户端会先发布带 `setFullScreenIntent` 的高优先级来电通知，再尝试直接启动来电页。应用在前台、锁屏或后台时都走同一入口；Android 系统或厂商策略仍可能拦截后台 Activity 启动，此时通知栏来电会作为兜底。必须允许通知、全屏通知、自启动、后台运行和锁屏显示权限。
+收到高优先级 FCM 后，客户端先在后台准备语音，下载完成后才发布带 `setFullScreenIntent` 的高优先级来电通知并尝试直接启动来电页。准备阶段不发布来电通知；下载失败只显示普通可重试通知。应用在前台、锁屏或后台时都走同一入口；Android 系统或厂商策略仍可能拦截后台 Activity 启动，此时通知栏来电会作为兜底。必须允许通知、全屏通知、自启动、后台运行和锁屏显示权限。
 
 ## 自动识别新增订阅成员
 
