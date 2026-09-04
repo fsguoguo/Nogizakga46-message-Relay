@@ -2,6 +2,8 @@ package com.nogirelay.app.call
 
 import android.app.Notification
 import android.app.NotificationManager
+import android.app.ActivityManager
+import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.app.Person
 import android.content.Context
@@ -26,11 +28,21 @@ object IncomingCallNotifier {
             putExtra(EXTRA_MESSAGE_ID, message.id)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
+        val creatorOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ActivityOptions.makeBasic().apply {
+                setPendingIntentCreatorBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                )
+            }.toBundle()
+        } else {
+            null
+        }
         val fullScreenPendingIntent = PendingIntent.getActivity(
             context,
             message.id.hashCode(),
             fullScreenIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            creatorOptions,
         )
 
         val answerIntent = Intent(context, CallActionReceiver::class.java).apply {
@@ -84,10 +96,54 @@ object IncomingCallNotifier {
         // a direct launch. The latter covers foreground, locked, and OEM
         // background cases where the notification is delivered but the
         // system delays executing the full-screen PendingIntent.
-        runCatching { context.startActivity(fullScreenIntent) }
-            .onFailure { error ->
-                Log.w("NogiRelay", "Direct call activity launch was blocked; keeping notification fallback", error)
+        val launchedDirectly = runCatching {
+            if (isAppInForeground(context)) {
+                context.startActivity(fullScreenIntent)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val options = ActivityOptions.makeBasic().apply {
+                    setPendingIntentCreatorBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                    )
+                    setPendingIntentBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                    )
+                }
+                fullScreenPendingIntent.send(context, 0, null, null, null, null, options.toBundle())
+            } else {
+                context.startActivity(fullScreenIntent)
             }
+            true
+        }.onFailure { error ->
+            Log.w("NogiRelay", "Call activity launch was blocked; keeping notification fallback", error)
+        }.getOrDefault(false)
+        if (!launchedDirectly) {
+            runCatching { fullScreenPendingIntent.send() }
+                .onFailure { error -> Log.w("NogiRelay", "PendingIntent call activity fallback was blocked", error) }
+        }
+    }
+
+    /** Shows a retryable notification without opening the call page prematurely. */
+    fun showUnavailable(context: Context, message: RelayMessage, reason: String) {
+        val retryIntent = Intent(context, IncomingCallPreparationService::class.java).apply {
+            putExtra(EXTRA_MESSAGE_ID, message.id)
+        }
+        val pendingIntent = PendingIntent.getService(
+            context,
+            message.id.hashCode(),
+            retryIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = Notification.Builder(context, NotificationChannels.CALLS)
+            .setSmallIcon(R.drawable.ic_notification_call)
+            .setContentTitle(message.incomingCallFrom ?: message.memberName)
+            .setContentText(reason)
+            .setCategory(Notification.CATEGORY_CALL)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        context.getSystemService(NotificationManager::class.java)
+            .notify(notificationId(message.id), notification)
     }
 
     fun showMessage(context: Context, message: RelayMessage) {
@@ -124,6 +180,13 @@ object IncomingCallNotifier {
 
     fun cancel(context: Context, messageId: String) {
         context.getSystemService(NotificationManager::class.java).cancel(notificationId(messageId))
+    }
+
+    private fun isAppInForeground(context: Context): Boolean {
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
+        return manager.runningAppProcesses
+            ?.firstOrNull { it.processName == context.packageName }
+            ?.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
     }
 
     private fun notificationId(messageId: String): Int = 10_000 + (messageId.hashCode() and 0x0FFF_FFFF)

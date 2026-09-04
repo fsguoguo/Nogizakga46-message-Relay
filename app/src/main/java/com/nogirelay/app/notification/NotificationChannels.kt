@@ -9,6 +9,7 @@ import com.nogirelay.app.R
 
 object NotificationChannels {
     const val CALLS = "incoming_calls_v2"
+    const val CALL_PREPARING = "incoming_call_prepare_v1"
     const val MESSAGES = "member_messages_v1"
     const val PLAYBACK = "voice_playback_v1"
 
@@ -48,6 +49,17 @@ object NotificationChannels {
             NotificationManager.IMPORTANCE_LOW,
         ).apply { setSound(null, null) }
 
-        manager.createNotificationChannels(listOf(calls, messages, playback))
+        val preparing = NotificationChannel(
+            CALL_PREPARING,
+            "来电准备",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "下载语音资源时的后台状态"
+            setSound(null, null)
+            enableVibration(false)
+            setShowBadge(false)
+        }
+
+        manager.createNotificationChannels(listOf(calls, preparing, messages, playback))
     }
 }
