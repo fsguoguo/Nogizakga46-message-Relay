@@ -281,7 +281,7 @@ private fun RelayApp(
             }
         },
         bottomBar = {
-            NavigationBar(containerColor = Color.White) {
+            NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
                 AppTab.entries.forEach { item ->
                     NavigationBarItem(
                         selected = tab == item,
