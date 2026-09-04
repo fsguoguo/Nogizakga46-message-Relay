@@ -54,6 +54,7 @@ class MessageService {
         sent_at, incoming_call_from, ringtone_url, is_played, original_data,
         media_local_path, thumbnail_local_path, phone_image_local_path
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      ON CONFLICT (id) DO NOTHING
       RETURNING *`,
       [
         message.id,
@@ -77,7 +78,15 @@ class MessageService {
       ]
     );
 
-    return { message: result, isNew: true };
+    if (result) return { message: result, isNew: true };
+
+    // A connection can be lost after PostgreSQL commits an insert. The retry
+    // then sees the conflict; treat that race as a successful existing row.
+    const racedMessage = await db.queryOne(
+      'SELECT * FROM messages WHERE id = $1',
+      [message.id],
+    );
+    return { message: racedMessage || message, isNew: false };
   }
 
   async getStoredMediaPath(messageId, kind) {

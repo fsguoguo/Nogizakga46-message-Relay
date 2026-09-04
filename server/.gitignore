@@ -2,9 +2,12 @@
 node_modules/
 .env
 *.log
+logs/
 firebase-admin-key.json
 nogi-browser-state.json
 nogi-browser-state.json.tmp-*
+nogi-access-token.json
+nogi-access-token.json.tmp-*
 .DS_Store
 dist/
 build/

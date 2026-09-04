@@ -2,6 +2,7 @@ import admin from 'firebase-admin';
 import { readFileSync } from 'fs';
 import dotenv from 'dotenv';
 import mediaArchive from './media.js';
+import { recordError } from './error-log.js';
 
 dotenv.config();
 
@@ -73,7 +74,7 @@ export function initializeFirebase() {
     console.log('Firebase Admin SDK initialized');
     return firebaseApp;
   } catch (error) {
-    console.error('Failed to initialize Firebase:', error);
+    void recordError('firebase.initialize', error);
     throw error;
   }
 }
@@ -117,7 +118,7 @@ export async function sendPushNotification(token, message, includePayload = true
     console.log('FCM push sent successfully:', response);
     return { success: true, messageId: response };
   } catch (error) {
-    console.error('FCM push failed:', error);
+    await recordError('firebase.push', error, { message_id: message.id, token_present: Boolean(token) });
     return { success: false, error: error.message };
   }
 }
@@ -165,7 +166,7 @@ export async function sendMulticastPush(tokens, message) {
       responses: response.responses,
     };
   } catch (error) {
-    console.error('FCM multicast failed:', error);
+    await recordError('firebase.multicast', error, { message_id: message.id, token_count: tokens.length });
     return { success: false, error: error.message };
   }
 }

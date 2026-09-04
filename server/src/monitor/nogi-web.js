@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import messageService from '../services/message.js';
 import pushService from '../services/push.js';
 import mediaArchive from '../services/media.js';
+import { recordError } from '../services/error-log.js';
 
 dotenv.config();
 
@@ -130,7 +131,7 @@ class NogiWebMonitor {
           await this.refreshIfDue();
           await this.poll();
         } catch (error) {
-          console.error('Nogi monitor poll failed:', error.message);
+          await recordError('monitor.poll', error, { mode: 'direct', has_access_token: Boolean(this.accessToken) });
         }
 
         if (this.isRunning) await sleep(this.pollIntervalMs);
@@ -323,17 +324,30 @@ class NogiWebMonitor {
   async processMessage(message, sendPush) {
     try {
       const result = await this.messageStore.saveMessage(message);
-      if (!result.isNew || !sendPush) return { isNew: result.isNew, pushed: false };
+      if (!result.isNew || !sendPush) {
+        return { isNew: result.isNew, pushed: false, processed: true };
+      }
 
       try {
-        await this.pusher.smartPush(result.message || message);
+        const pushResult = await this.pusher.smartPush(result.message || message);
+        return {
+          isNew: true,
+          pushed: pushResult?.success !== false,
+          processed: true,
+        };
       } catch (error) {
-        console.error(`Push failed for message ${message.id}:`, error.message);
+        await recordError('monitor.push', error, { message_id: message.id, member_id: message.member_id });
+        return { isNew: true, pushed: false, processed: true };
       }
-      return { isNew: true, pushed: true };
     } catch (error) {
-      console.error(`Failed to store message ${message.id}:`, error.message);
-      return { isNew: false, pushed: false };
+      await recordError('monitor.store', error, {
+        message_id: message.id,
+        member_id: message.member_id,
+        member_name: message.member_name,
+        type: message.type,
+        sent_at: message.sent_at,
+      });
+      return { isNew: false, pushed: false, processed: false };
     }
   }
 
@@ -348,20 +362,28 @@ class NogiWebMonitor {
 
     for (const group of groups) {
       const rawMessages = await this.fetchTimeline(group.id);
-      const previousIds = this.groupMessageIds.get(group.id);
+      const previousIds = this.groupMessageIds.get(group.id) || new Set();
       const currentIds = new Set(rawMessages.map(rawMessage => String(rawMessage.id ?? rawMessage.message_id)));
-      const newMessages = previousIds
-        ? rawMessages.filter(rawMessage => !previousIds.has(String(rawMessage.id ?? rawMessage.message_id)))
-        : rawMessages;
-      this.groupMessageIds.set(group.id, currentIds);
+      const newMessages = rawMessages.filter(rawMessage => !previousIds.has(String(rawMessage.id ?? rawMessage.message_id)));
+      const failedIds = new Set();
       fetched += newMessages.length;
       for (const rawMessage of newMessages.reverse()) {
+        const rawId = String(rawMessage.id ?? rawMessage.message_id);
         const message = this.normalizeMessage(rawMessage, group);
-        if (!message) continue;
+        if (!message) {
+          previousIds.add(rawId);
+          continue;
+        }
         const result = await this.processMessage(message, sendPush);
         stored += result.isNew ? 1 : 0;
         pushed += result.pushed ? 1 : 0;
+        if (result.processed) previousIds.add(rawId);
+        else failedIds.add(rawId);
       }
+      this.groupMessageIds.set(
+        group.id,
+        new Set([...currentIds].filter(id => !failedIds.has(id))),
+      );
     }
 
     this.hasCompletedInitialPoll = true;
@@ -376,7 +398,7 @@ export default monitor;
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   monitor.start().catch(error => {
-    console.error('Nogi monitor stopped:', error);
+    void recordError('monitor.start', error);
     process.exitCode = 1;
   });
 

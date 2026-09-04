@@ -55,6 +55,23 @@ CREATE TABLE IF NOT EXISTS push_logs (
 CREATE INDEX idx_push_logs_message_id ON push_logs(message_id);
 CREATE INDEX idx_push_logs_device_id ON push_logs(device_id);
 CREATE INDEX idx_push_logs_created_at ON push_logs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS error_logs (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    level VARCHAR(20) NOT NULL,
+    scope VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    error_name VARCHAR(255),
+    error_code VARCHAR(100),
+    stack TEXT,
+    context JSONB,
+    process_group VARCHAR(100),
+    machine_id VARCHAR(255)
+);
+
+CREATE INDEX IF NOT EXISTS idx_error_logs_created_at ON error_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_error_logs_scope ON error_logs(scope);
 CREATE INDEX idx_push_logs_status ON push_logs(status);
 
 -- 更新设备的 updated_at 触发器

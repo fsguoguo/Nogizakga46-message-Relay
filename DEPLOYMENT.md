@@ -39,6 +39,7 @@ Firebase 密钥三种方式只需配置一种，读取优先级为：Base64、JS
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `NOGI_BROWSER_STATE_FILE` | `/data/nogi-browser-state.json` | 持久化浏览器登录状态 |
+| `NOGI_ACCESS_TOKEN_STATE_FILE` | `/data/nogi-access-token.json` | 持久化当前短期访问令牌（权限 0600，自动过期） |
 | `NOGI_BROWSER_HEADLESS` | `true` | 服务器使用无界面浏览器 |
 | `NOGI_BROWSER_BLOCK_MEDIA` | `true` | 页面层阻止图片、媒体、字体，减少资源消耗 |
 | `NOGI_BROWSER_AUTH_WAIT_SECONDS` | `30` | 等待页面发出授权请求的时间 |
@@ -48,6 +49,11 @@ Firebase 密钥三种方式只需配置一种，读取优先级为：Base64、JS
 | `NOGI_BROWSER_RESTART_INTERVAL_SECONDS` | `1800` | 重建浏览器进程以释放内存的间隔 |
 | `NOGI_BROWSER_EXECUTABLE_PATH` | 空 | 本地指定 Edge/Chrome/Chromium 路径 |
 | `NOGI_BROWSER_CHANNEL` | headless 时为 `chromium-headless-shell` | Playwright 浏览器通道 |
+| `DB_RETRY_ATTEMPTS` | `6`（生产） | PostgreSQL 瞬时连接失败时的最大尝试次数 |
+| `DB_RETRY_BASE_DELAY_MS` | `1000` | PostgreSQL 重试初始退避时间 |
+| `DB_RETRY_MAX_DELAY_MS` | `15000` | PostgreSQL 重试最大退避时间 |
+| `DB_CONNECTION_TIMEOUT_MS` | `10000` | PostgreSQL 单次连接等待时间 |
+| `LOG_STORAGE_DIR` | `/data/nogi-logs`（生产） | 结构化错误日志目录；monitor 卷上持久保存 |
 
 浏览器模式不自行实现官网 refresh token 协议。官网页面负责刷新，监控进程只观察页面请求中的短期 `Authorization`，在内存中使用，并在官网刷新成功后重新保存浏览器状态。
 
@@ -84,6 +90,8 @@ Firebase 密钥三种方式只需配置一种，读取优先级为：Base64、JS
 - `monitor` 挂载 `nogi_media` 持久卷到 `/data`。
 - API 至少保持一台机器运行，monitor 与 API 使用同一发布版本。
 - Docker 基础镜像包含与 Playwright 匹配的 Chromium。
+- API 主端口配置 TCP 健康检查间隔 `15s`、超时 `20s`，并配置 `/health` HTTP 检查间隔 `30s`、超时 `5s`。
+- monitor 媒体端口配置 TCP 健康检查间隔 `30s`、超时 `5s`；这些是 Fly 健康检查，不等同于数据库或官网请求超时。
 
 ### 2.2 设置 Secret
 
@@ -122,6 +130,14 @@ Invoke-RestMethod -Method Post -Uri 'https://nogi-relay.fly.dev/init-db' -Header
 ```
 
 schema 会创建媒体字段 `media_local_path`、`thumbnail_local_path` 和来电背景字段 `phone_image_local_path`。API 启动时还会执行兼容性迁移。
+
+数据库机器不能使用自动休眠。`nogi-db` 是独立的 Fly 应用，部署 `nogi-relay` 不会覆盖它的机器配置；请保持数据库机器的 autostop 关闭，并清除 Postgres Flex 的 scale-to-zero 倒计时：
+
+```powershell
+flyctl machine update 683557df504348 -a nogi-db --autostop off '--env=FLY_SCALE_TO_ZERO=' --yes
+```
+
+这里的空值是有意的：Postgres Flex 源码会在变量未配置/为空时不启动 scale-to-zero worker；`0s` 反而会导致 ticker 崩溃。执行后确认 `flyctl logs -a nogi-db` 不再出现 `Configured scale to zero with duration`，并确认数据库保持 `started`。服务端仍会对 PostgreSQL 连接和读写做指数退避重试。
 
 ### 2.4 上传官网浏览器会话
 
@@ -164,7 +180,18 @@ flyctl releases --app nogi-relay
 flyctl deploy --app nogi-relay --image registry.fly.io/nogi-relay:IMAGE_TAG
 ```
 
-### 2.6 媒体卷
+### 2.6 清理停止的机器
+
+停止的机器不一定是故障，也可能是发布留下的旧副本。删除前先确认它没有持久卷、不是唯一的 `app` 实例，并保留正在运行的 `monitor`：
+
+```powershell
+flyctl machine list -a nogi-relay
+flyctl machine destroy MACHINE_ID -a nogi-relay
+```
+
+只有满足以下条件才清理：状态为 `stopped`、`VOLUME` 为空、同一进程组至少还有一台 `started` 机器。不要删除挂载 `/data` 的 monitor 机器，也不要把数据库机器的清理命令用于 `nogi-relay`。
+
+### 2.7 媒体卷
 
 正式图片、语音、视频、缩略图和来电背景存储在 `/data/nogi-media/<消息ID>/`：
 
@@ -296,6 +323,15 @@ Nogi browser monitor poll complete: groups=..., fetched=..., stored=..., pushed=
 ```powershell
 flyctl logs --app nogi-relay --no-tail
 flyctl machine status MONITOR_MACHINE_ID -a nogi-relay
+```
+
+monitor 会把错误和告警追加到持久化卷的 `/data/nogi-logs/errors-YYYY-MM-DD.jsonl`，并将结构化错误（堆栈、错误码、消息 ID、进程和机器信息）写入 PostgreSQL 的 `error_logs` 表。数据库暂时不可用时，JSONL 文件仍会保留；可用以下查询检查最近错误：
+
+```sql
+SELECT created_at, scope, message, error_code, context
+FROM error_logs
+ORDER BY created_at DESC
+LIMIT 100;
 ```
 
 不要在日志中输出官网 Token、Firebase 私钥、FCM Token 或浏览器 state 内容。

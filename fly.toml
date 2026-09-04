@@ -14,6 +14,15 @@ primary_region = "nrt"  # Tokyo, Japan (closest to China)
 
 [env]
   NODE_ENV = "production"
+  LOG_STORAGE_DIR = "/data/nogi-logs"
+  LOG_MAX_FILE_BYTES = "26214400"
+  LOG_RETENTION_DAYS = "30"
+  DB_RETRY_ATTEMPTS = "6"
+  DB_RETRY_BASE_DELAY_MS = "1000"
+  DB_RETRY_MAX_DELAY_MS = "15000"
+  DB_CONNECTION_TIMEOUT_MS = "10000"
+  DB_POOL_MIN = "1"
+  DB_POOL_MAX = "20"
   PORT = "8080"
   NOGI_WEB_URL = "https://message.nogizaka46.com"
   NOGI_API_URL = "https://api.message.nogizaka46.com"
@@ -25,6 +34,7 @@ primary_region = "nrt"  # Tokyo, Japan (closest to China)
   NOGI_BACKFILL_ON_START = "true"
   NOGI_MONITOR_MODE = "browser"
   NOGI_BROWSER_STATE_FILE = "/data/nogi-browser-state.json"
+  NOGI_ACCESS_TOKEN_STATE_FILE = "/data/nogi-access-token.json"
   NOGI_BROWSER_HEADLESS = "true"
   NOGI_BROWSER_AUTH_WAIT_SECONDS = "30"
   NOGI_BROWSER_SETTLE_SECONDS = "8"
@@ -82,7 +92,7 @@ primary_region = "nrt"  # Tokyo, Japan (closest to China)
 
   [[services.tcp_checks]]
     interval = "15s"
-    timeout = "2s"
+    timeout = "20s"
     grace_period = "5s"
 
   [[services.http_checks]]

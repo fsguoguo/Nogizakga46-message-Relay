@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import messageService from '../services/message.js';
 import pushService from '../services/push.js';
 import { NogiWebMonitor } from './nogi-web.js';
+import { recordError } from '../services/error-log.js';
 
 dotenv.config();
 
@@ -38,6 +39,17 @@ function browserExecutablePath() {
   return process.env.NOGI_BROWSER_EXECUTABLE_PATH
     || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
     || undefined;
+}
+
+function tokenExpiry(token) {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return Number.isFinite(decoded.exp) ? new Date(decoded.exp * 1000) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -88,6 +100,8 @@ class NogiBrowserMonitor {
     this.headless = parseBoolean(process.env.NOGI_BROWSER_HEADLESS, true);
     this.blockPageMedia = parseBoolean(process.env.NOGI_BROWSER_BLOCK_MEDIA, true);
     this.storageStateFile = process.env.NOGI_BROWSER_STATE_FILE || DEFAULT_BROWSER_STATE_FILE;
+    this.accessTokenStateFile = process.env.NOGI_ACCESS_TOKEN_STATE_FILE
+      || path.join(path.dirname(this.storageStateFile), 'nogi-access-token.json');
     this.pageUrl = `${this.webUrl}/organization/${encodeURIComponent(this.organizationId)}/talk?mode=normal`;
     this.browser = null;
     this.context = null;
@@ -102,6 +116,7 @@ class NogiBrowserMonitor {
     this.isRunning = false;
     this.accessToken = '';
     this.observedTokenAt = 0;
+    this.lastPersistedAccessToken = '';
     this.hasCompletedInitialPoll = false;
     this.groupMessageIds = new Map();
     this.groups = new Map();
@@ -131,8 +146,12 @@ class NogiBrowserMonitor {
           if (this.shouldRestartBrowser()) await this.restartBrowser();
           if (this.shouldRefreshFrontendSession()) await this.refreshFrontendSession();
           await this.poll();
-        } catch (error) {
-          console.error('Nogi browser monitor poll failed:', error.message);
+      } catch (error) {
+          await recordError('monitor.poll', error, {
+            mode: 'browser',
+            has_access_token: Boolean(this.accessToken),
+            browser_started_at: this.browserStartedAt || null,
+          });
         }
         if (this.isRunning) await sleep(this.pollIntervalMs);
       }
@@ -151,6 +170,7 @@ class NogiBrowserMonitor {
     await this.closeBrowser();
     try {
       const storageState = await this.loadStorageState();
+      const persistedAccessToken = await this.loadAccessTokenState();
       const executablePath = browserExecutablePath();
       this.browser = await this.browserType.launch({
         headless: this.headless,
@@ -166,6 +186,11 @@ class NogiBrowserMonitor {
       });
       this.context = await this.browser.newContext(storageState ? { storageState } : {});
       this.page = this.context.pages()[0] || await this.context.newPage();
+      if (persistedAccessToken) {
+        this.accessToken = persistedAccessToken;
+        this.observedTokenAt = Date.now();
+        this.lastFrontendNavigationAt = Date.now();
+      }
       this.page.on('request', request => this.observeRequest(request));
       this.page.on('response', response => this.observeResponse(response));
       if (this.blockPageMedia) {
@@ -234,6 +259,7 @@ class NogiBrowserMonitor {
     if (!token) return;
     this.accessToken = token;
     this.observedTokenAt = Date.now();
+    void this.persistAccessToken();
     for (const waiter of this.accessTokenWaiters) waiter.resolve(token);
     this.accessTokenWaiters.clear();
   }
@@ -303,6 +329,7 @@ class NogiBrowserMonitor {
           console.log('Nogi browser session supplied a refreshed access token');
         }
         await this.persistStorageState();
+        await this.persistAccessToken();
       } catch (error) {
         this.accessToken = previousToken;
         this.observedTokenAt = previousObservedTokenAt;
@@ -405,20 +432,28 @@ class NogiBrowserMonitor {
 
     for (const group of groups) {
       const rawMessages = await this.fetchTimeline(group.id);
-      const previousIds = this.groupMessageIds.get(group.id);
+      const previousIds = this.groupMessageIds.get(group.id) || new Set();
       const currentIds = new Set(rawMessages.map(rawMessage => String(rawMessage.id ?? rawMessage.message_id)));
-      const newMessages = previousIds
-        ? rawMessages.filter(rawMessage => !previousIds.has(String(rawMessage.id ?? rawMessage.message_id)))
-        : rawMessages;
-      this.groupMessageIds.set(group.id, currentIds);
+      const newMessages = rawMessages.filter(rawMessage => !previousIds.has(String(rawMessage.id ?? rawMessage.message_id)));
+      const failedIds = new Set();
       fetched += newMessages.length;
       for (const rawMessage of newMessages.reverse()) {
+        const rawId = String(rawMessage.id ?? rawMessage.message_id);
         const message = this.normalizer.normalizeMessage(rawMessage, group);
-        if (!message) continue;
+        if (!message) {
+          previousIds.add(rawId);
+          continue;
+        }
         const result = await this.normalizer.processMessage(message, sendPush);
         stored += result.isNew ? 1 : 0;
         pushed += result.pushed ? 1 : 0;
+        if (result.processed) previousIds.add(rawId);
+        else failedIds.add(rawId);
       }
+      this.groupMessageIds.set(
+        group.id,
+        new Set([...currentIds].filter(id => !failedIds.has(id))),
+      );
     }
 
     this.hasCompletedInitialPoll = true;
@@ -435,6 +470,38 @@ class NogiBrowserMonitor {
     } catch (error) {
       if (error.code !== 'ENOENT') console.warn('Nogi browser state could not be loaded:', error.message);
       return null;
+    }
+  }
+
+  async loadAccessTokenState() {
+    try {
+      const state = JSON.parse(await fs.readFile(this.accessTokenStateFile, 'utf8'));
+      const token = String(state.accessToken || '').trim();
+      const expiresAt = tokenExpiry(token);
+      if (!token || (expiresAt && expiresAt.getTime() <= Date.now() + 30_000)) return '';
+      return token;
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.warn('Nogi access token state could not be loaded:', error.message);
+      return '';
+    }
+  }
+
+  async persistAccessToken() {
+    if (!this.accessToken || this.accessToken === this.lastPersistedAccessToken) return;
+    const token = this.accessToken;
+    this.lastPersistedAccessToken = token;
+    try {
+      const directory = path.dirname(this.accessTokenStateFile);
+      await fs.mkdir(directory, { recursive: true });
+      const tempFile = `${this.accessTokenStateFile}.tmp-${process.pid}-${Date.now()}`;
+      await fs.writeFile(tempFile, JSON.stringify({
+        accessToken: token,
+        savedAt: Date.now(),
+      }), { mode: 0o600 });
+      await fs.rename(tempFile, this.accessTokenStateFile);
+    } catch (error) {
+      if (this.lastPersistedAccessToken === token) this.lastPersistedAccessToken = '';
+      console.warn('Nogi access token state could not be persisted:', error.message);
     }
   }
 
@@ -468,7 +535,7 @@ export default monitor;
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { default: mediaServer } = await import('./media-server.js');
   mediaServer.start().then(() => monitor.start()).catch(error => {
-    console.error('Nogi browser monitor stopped:', error);
+    void recordError('monitor.start', error);
     process.exitCode = 1;
   });
 

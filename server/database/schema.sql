@@ -64,6 +64,24 @@ CREATE INDEX idx_push_logs_device_id ON push_logs(device_id);
 CREATE INDEX idx_push_logs_status ON push_logs(status);
 CREATE INDEX idx_push_logs_created_at ON push_logs(created_at DESC);
 
+-- 持久化结构化错误日志
+CREATE TABLE IF NOT EXISTS error_logs (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    level VARCHAR(20) NOT NULL,
+    scope VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    error_name VARCHAR(255),
+    error_code VARCHAR(100),
+    stack TEXT,
+    context JSONB,
+    process_group VARCHAR(100),
+    machine_id VARCHAR(255)
+);
+
+CREATE INDEX IF NOT EXISTS idx_error_logs_created_at ON error_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_error_logs_scope ON error_logs(scope);
+
 -- 创建成员表（可选，用于存储成员信息）
 CREATE TABLE IF NOT EXISTS members (
     id VARCHAR(255) PRIMARY KEY,

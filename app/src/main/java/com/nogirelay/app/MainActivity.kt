@@ -143,6 +143,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The launch theme mirrors the official app splash until Compose draws its first frame.
+        setTheme(R.style.Theme_NogiRelay)
         AppGraph.initialize(this)
         NotificationChannels.create(this)
         AppGraph.database.deleteTestMessages().forEach { IncomingCallNotifier.cancel(this, it) }
@@ -279,7 +281,7 @@ private fun RelayApp(
             }
         },
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+            NavigationBar(containerColor = Color.White) {
                 AppTab.entries.forEach { item ->
                     NavigationBarItem(
                         selected = tab == item,
@@ -323,7 +325,6 @@ private fun RelayApp(
 
                 AppTab.MESSAGES -> MessagesScreen(
                     refreshKey = refreshKey,
-                    initialMessageId = initialMessageId,
                     onOpenMedia = onOpenMedia,
                     onPlayVoice = onPlayVoice,
                 )
@@ -520,7 +521,6 @@ private fun PermissionRow(
 @Composable
 private fun MessagesScreen(
     refreshKey: Int,
-    initialMessageId: String?,
     onOpenMedia: (RelayMessage) -> Unit,
     onPlayVoice: (RelayMessage) -> Unit,
 ) {
@@ -705,38 +705,40 @@ private fun MessagesScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = {
-                        searchQuery = it
-                        currentPage = 0
-                        pageInput = "1"
-                    },
-                    singleLine = true,
-                    label = { Text("搜索") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    trailingIcon = if (searchQuery.isNotEmpty()) {
-                        {
-                            IconButton(
-                                onClick = {
-                                    searchQuery = ""
-                                    currentPage = 0
-                                    pageInput = "1"
-                                },
-                            ) {
-                                Icon(Icons.Rounded.Close, contentDescription = "清除搜索")
-                            }
-                        }
-                    } else {
-                        null
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                )
                 LazyColumn(
                     state = messageListState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
                 ) {
+                    item {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = {
+                                searchQuery = it
+                                currentPage = 0
+                                pageInput = "1"
+                            },
+                            singleLine = true,
+                            label = { Text("搜索") },
+                            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                            trailingIcon = if (searchQuery.isNotEmpty()) {
+                                {
+                                    IconButton(
+                                        onClick = {
+                                            searchQuery = ""
+                                            currentPage = 0
+                                            pageInput = "1"
+                                        },
+                                    ) {
+                                        Icon(Icons.Rounded.Close, contentDescription = "清除搜索")
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        )
+                    }
                     if (memberMessages.isEmpty()) {
                         item {
                             Text(
@@ -749,7 +751,6 @@ private fun MessagesScreen(
                     items(memberMessages, key = { it.id }) { message ->
                         MessageCard(
                             message = message,
-                            highlighted = message.id == initialMessageId,
                             audioState = playbackState.takeIf { it.messageId == message.id },
                             translationEnabled = translationEnabled,
                             onOpenMedia = { onOpenMedia(message) },
@@ -914,7 +915,6 @@ private fun threadPreview(message: RelayMessage): String = when (message.type) {
 @Composable
 private fun MessageCard(
     message: RelayMessage,
-    highlighted: Boolean,
     audioState: VoicePlaybackState?,
     translationEnabled: Boolean,
     onOpenMedia: () -> Unit,
@@ -939,7 +939,7 @@ private fun MessageCard(
     }
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+            containerColor = MaterialTheme.colorScheme.surface,
         ),
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth(),

@@ -9,8 +9,9 @@ import { authenticate, errorHandler, notFound, requestLogger } from './middlewar
 import devicesRouter from './routes/devices.js';
 import messagesRouter from './routes/messages.js';
 import pushRouter from './routes/push.js';
-import { pool } from './db/index.js';
+import { pool, query as dbQuery } from './db/index.js';
 import mediaArchive from './services/media.js';
+import { recordError } from './services/error-log.js';
 
 dotenv.config();
 
@@ -21,7 +22,7 @@ const PORT = process.env.PORT || 3000;
 try {
   initializeFirebase();
 } catch (error) {
-  console.error('Failed to initialize Firebase:', error);
+  await recordError('server.firebase_initialize', error);
   process.exit(1);
 }
 
@@ -117,6 +118,24 @@ app.post('/init-db', authenticate, async (req, res) => {
       CREATE INDEX IF NOT EXISTS idx_push_logs_status ON push_logs(status);
       CREATE INDEX IF NOT EXISTS idx_push_logs_created_at ON push_logs(created_at DESC);
 
+      -- 持久化结构化错误日志，便于在 Fly 日志轮转后追查故障
+      CREATE TABLE IF NOT EXISTS error_logs (
+          id BIGSERIAL PRIMARY KEY,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          level VARCHAR(20) NOT NULL,
+          scope VARCHAR(255) NOT NULL,
+          message TEXT NOT NULL,
+          error_name VARCHAR(255),
+          error_code VARCHAR(100),
+          stack TEXT,
+          context JSONB,
+          process_group VARCHAR(100),
+          machine_id VARCHAR(255)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_error_logs_created_at ON error_logs(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_error_logs_scope ON error_logs(scope);
+
       -- 创建成员表
       CREATE TABLE IF NOT EXISTS members (
           id VARCHAR(255) PRIMARY KEY,
@@ -154,7 +173,7 @@ app.post('/init-db', authenticate, async (req, res) => {
           FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
     `;
 
-    await pool.query(schemaSQL);
+    await dbQuery(schemaSQL);
 
     res.json({
       success: true,
@@ -162,7 +181,7 @@ app.post('/init-db', authenticate, async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Database initialization error:', error);
+    await recordError('server.database_initialize', error);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -180,14 +199,29 @@ app.use('/v1/push', authenticate, pushRouter);
 // idempotent and do not alter existing message rows.
 async function ensureMessageMediaColumns() {
   try {
-    await pool.query(`
+    await dbQuery(`
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_local_path TEXT;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS thumbnail_local_path TEXT;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS phone_image_local_path TEXT;
+      CREATE TABLE IF NOT EXISTS error_logs (
+          id BIGSERIAL PRIMARY KEY,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          level VARCHAR(20) NOT NULL,
+          scope VARCHAR(255) NOT NULL,
+          message TEXT NOT NULL,
+          error_name VARCHAR(255),
+          error_code VARCHAR(100),
+          stack TEXT,
+          context JSONB,
+          process_group VARCHAR(100),
+          machine_id VARCHAR(255)
+      );
+      CREATE INDEX IF NOT EXISTS idx_error_logs_created_at ON error_logs(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_error_logs_scope ON error_logs(scope);
     `);
     console.log('Database message media columns verified');
   } catch (error) {
-    console.error('Database compatibility migration failed:', error.message);
+    await recordError('server.database_migration', error);
   }
 }
 
@@ -197,12 +231,12 @@ await ensureMessageMediaColumns();
 // returned by history sync or counted as real messages after a restart.
 async function cleanupTransientTestMessages() {
   try {
-    const result = await pool.query("DELETE FROM messages WHERE id ~ '^test[-_]'");
+    const result = await dbQuery("DELETE FROM messages WHERE id ~ '^test[-_]'");
     if (result.rowCount > 0) {
       console.log(`Removed ${result.rowCount} transient test message(s)`);
     }
   } catch (error) {
-    console.error('Transient test message cleanup failed:', error.message);
+    await recordError('server.test_message_cleanup', error);
   }
 }
 
@@ -236,5 +270,12 @@ const shutdown = async (signal) => {
 
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
+
+process.on('uncaughtException', error => {
+  void recordError('server.uncaught_exception', error).finally(() => process.exit(1));
+});
+process.on('unhandledRejection', reason => {
+  void recordError('server.unhandled_rejection', reason instanceof Error ? reason : new Error(String(reason)));
+});
 
 export default app;

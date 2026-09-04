@@ -12,7 +12,7 @@
     "monitor:browser": "node src/monitor/nogi-browser.js",
     "bootstrap:browser": "node src/monitor/bootstrap-browser.js",
     "db:setup": "psql -U postgres -d nogi_relay -f database/schema.sql",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [
     "nogizaka46",

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { once } from 'node:events';
+import { recordError } from './error-log.js';
 
 const DEFAULT_STORAGE_DIR = '/app/nogi-media';
 const MAX_MEDIA_BYTES = Number.parseInt(process.env.MEDIA_MAX_BYTES || `${100 * 1024 * 1024}`, 10);
@@ -95,7 +96,7 @@ class MediaArchive {
       try {
         result.mediaLocalPath = await this.download(message.media_url, target);
       } catch (error) {
-        console.error(`Media archive failed for ${message.id}:`, error.message);
+        await recordError('media.archive', error, { message_id: message.id, kind: 'media', url: message.media_url });
       }
     }
     if (message.type !== 'text' && message.thumbnail_url) {
@@ -104,7 +105,7 @@ class MediaArchive {
       try {
         result.thumbnailLocalPath = await this.download(message.thumbnail_url, target);
       } catch (error) {
-        console.error(`Thumbnail archive failed for ${message.id}:`, error.message);
+        await recordError('media.archive', error, { message_id: message.id, kind: 'thumbnail', url: message.thumbnail_url });
       }
     }
     if (message.type === 'audio' && message.incoming_call_from && message.phone_image_url) {
@@ -113,7 +114,7 @@ class MediaArchive {
       try {
         result.phoneImageLocalPath = await this.download(message.phone_image_url, target);
       } catch (error) {
-        console.error(`Phone image archive failed for ${message.id}:`, error.message);
+        await recordError('media.archive', error, { message_id: message.id, kind: 'phone_image', url: message.phone_image_url });
       }
     }
     return result;

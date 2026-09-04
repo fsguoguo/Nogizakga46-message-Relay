@@ -12,6 +12,8 @@
 - 按成员轮询时间线并识别新消息。
 - 支持文字、图片、语音和视频消息。
 - 通过消息 ID 去重并写入 PostgreSQL。
+- PostgreSQL 瞬时连接失败会指数退避重试；monitor 不会提前确认失败消息，下一轮会重新处理。
+- 错误会保留结构化上下文、堆栈和进程信息，并在可用时写入 `error_logs`。
 - 把图片、语音、视频和缩略图归档到持久化存储。
 - 通过受 Bearer Token 保护的地址向客户端提供媒体文件。
 - 通过 FCM 高优先级数据消息推送到已注册设备。
@@ -22,6 +24,8 @@
 
 - 接收 FCM 数据消息并写入本机 SQLite 数据库。
 - 启动或回到前台时自动同步服务器历史消息。
+- 冷启动或系统重建 Activity 时先显示与官方 Android App 一致的白底、居中乃木坂 46 启动过渡页，Compose 首帧绘制后切换到主界面。
+- 主界面内容区和底部导航栏使用同一纯白背景；启动图资源按 Android 版本分别适配。
 - 按成员显示消息会话。
 - 每页显示 20 条成员消息。
 - 支持上一页、下一页以及输入指定页码跳转。
@@ -97,7 +101,7 @@ nogizaka46msg/
 │       │   ├── push/                  FCM 接收和设备注册
 │       │   ├── translation/           OpenAI 翻译
 │       │   └── ui/                    主题、远程图片、媒体查看器
-│       └── res/                       图标、来电图片和铃声
+│       └── res/                       启动图标、来电图片、铃声和启动过渡页资源
 ├── server/                           Node.js 服务端
 │   ├── src/
 │   │   ├── index.js                  API 服务入口
@@ -560,6 +564,13 @@ subscription.state == active
 - 执行本机全屏来电界面测试。
 
 客户端在启动和每次回到前台时都会同步历史消息。单页读取 200 条，最多读取 50 页，即单次最多扫描 10,000 条服务器消息。
+
+### 启动过渡页与配色
+
+- `MainActivity` 在 Manifest 中使用独立的 `Theme.NogiRelay.Launch` 启动主题，首帧绘制后切换到 `Theme.NogiRelay`，因此不会把启动图留在主界面。
+- `res/drawable/launch_background.xml` 使用白色背景和居中标志；Android 12 及以上使用 `values-v31` 中的专用启动图。
+- `NogiRelayTheme` 的浅色 `background`、`surface` 以及系统状态栏/导航栏均为 `#FFFFFF`，底部 `NavigationBar` 直接使用同一背景色。
+- 启动页资源来自已安装官方 APK 的资源结构复核，仅复制启动图所需资源，不依赖官方 App 运行时。
 
 ### 消息
 
