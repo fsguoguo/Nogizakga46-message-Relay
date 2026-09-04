@@ -1,0 +1,10 @@
+# 添加到 .gitignore
+node_modules/
+.env
+*.log
+firebase-admin-key.json
+nogi-browser-state.json
+nogi-browser-state.json.tmp-*
+.DS_Store
+dist/
+build/

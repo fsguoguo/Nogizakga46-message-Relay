@@ -1,0 +1,35 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+build/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.jks
+*.keystore
+app/google-services.json
+relay/.venv/
+relay/relay.db*
+relay/*service-account*.json
+__pycache__/
+*.pyc
+.tmp-build/
+analysis/fcm-poc/node_modules/
+analysis/fcm-poc/credentials.json
+analysis/fcm-poc/gcm-credentials.json
+analysis/fcm-poc/credentials-modern.json
+analysis/fcm-poc/persistent-ids.json
+
+# Local Codex/editor metadata
+.claude/
+.codeartsdoer/
+.codegraph/
+.merkle-snapshot.json
+
+# Runtime credentials and local database files
+**/firebase-admin-key.json
+**/nogi-browser-state.json
+*.db
+*.db-*
